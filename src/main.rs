@@ -21,6 +21,13 @@ enum CliCommands {
         /// Solution file to expand
         #[arg(short, long, default_value = RAW_DATA_PATH_FROM_ROOT)]
         csv_path: String,
+
+        #[arg(
+            short,
+            long,
+            default_value_t = 8,
+        )]
+        fuse: u8,
     },
 }
 
@@ -35,7 +42,12 @@ fn main() {
 
 fn run(mut terminal: DefaultTerminal, cli: Cli) -> color_eyre::Result<()> {
     let runner: Box<dyn Runner> = match cli.cmd {
-        CliCommands::PrepareData { csv_path } => new_prepare_runner(csv_path),
+        CliCommands::PrepareData { csv_path, fuse } => {
+            if ![8, 16, 32].contains(&fuse) {
+                return Err(clap::Error::new(clap::error::ErrorKind::InvalidValue).into());
+            }
+            new_prepare_runner(csv_path, fuse)
+        }
     };
 
     runner.start()?;

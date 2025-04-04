@@ -1,6 +1,6 @@
 use std::{
     fs::File,
-    io::Write,
+    io::BufWriter,
     sync::{Arc, Mutex},
     thread,
     time::{Duration, Instant},
@@ -22,6 +22,7 @@ struct PrepareRunner {
     csv_path: String,
     info: Arc<Mutex<PrepareInfo>>,
     handle: Mutex<Option<thread::JoinHandle<()>>>,
+    fuse: u8,
 }
 
 #[derive(Clone)]
@@ -35,7 +36,8 @@ impl Runner for PrepareRunner {
     fn start(&self) -> color_eyre::Result<()> {
         let info = self.info.clone();
         let csv_path = self.csv_path.clone();
-        let handle = thread::spawn(|| run(info, csv_path));
+        let fuse = self.fuse.clone();
+        let handle = thread::spawn(move || run(info, csv_path, fuse));
         *self.handle.lock().unwrap() = Some(handle);
         Ok(())
     }
@@ -74,15 +76,16 @@ impl Runner for PrepareRunner {
     }
 }
 
-pub fn new_prepare_runner(csv_path: String) -> Box<dyn Runner> {
+pub fn new_prepare_runner(csv_path: String, fuse: u8) -> Box<dyn Runner> {
     Box::new(PrepareRunner {
         csv_path,
+        fuse,
         info: Arc::new(Mutex::new(PrepareInfo::Nothing)),
         handle: Mutex::new(None),
     })
 }
 
-fn run(info: Arc<Mutex<PrepareInfo>>, csv_path: String) {
+fn run(info: Arc<Mutex<PrepareInfo>>, csv_path: String, fuse: u8) {
     let start = Instant::now();
     let file_size = File::open(&csv_path).unwrap().metadata().unwrap().len();
 
@@ -104,11 +107,30 @@ fn run(info: Arc<Mutex<PrepareInfo>>, csv_path: String) {
         iters += 1;
     }
 
-    let filter = xorf::BinaryFuse16::try_from(&filter_data);
-    drop(filter_data);
-    let mut file = File::create("./data/xorfilter16").unwrap();
-    let serialized = bincode::encode_to_vec(filter, bincode::config::standard()).unwrap();
-    file.write_all(&serialized).unwrap();
+    match fuse {
+        8 => {
+            let filter = xorf::BinaryFuse8::try_from(&filter_data).unwrap();
+            drop(filter_data);
+            let mut writer = BufWriter::new(File::create("./data/xorfilter8").unwrap());
+            bincode::encode_into_std_write(filter, &mut writer, bincode::config::standard())
+                .unwrap();
+        }
+        16 => {
+            let filter = xorf::BinaryFuse16::try_from(&filter_data).unwrap();
+            drop(filter_data);
+            let mut writer = BufWriter::new(File::create("./data/xorfilter16").unwrap());
+            bincode::encode_into_std_write(filter, &mut writer, bincode::config::standard())
+                .unwrap();
+        }
+        32 => {
+            let filter = xorf::BinaryFuse32::try_from(&filter_data).unwrap();
+            drop(filter_data);
+            let mut writer = BufWriter::new(File::create("./data/xorfilter32").unwrap());
+            bincode::encode_into_std_write(filter, &mut writer, bincode::config::standard())
+                .unwrap();
+        }
+        _ => unreachable!(),
+    }
 
     *info.lock().unwrap() = PrepareInfo::Finished(iters, start.elapsed());
 }
