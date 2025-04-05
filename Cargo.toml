@@ -10,7 +10,11 @@ color-eyre = "0.6.3"
 criterion = "0.5.1"
 crossterm = "0.28.1"
 csv = "1.3.1"
+keccak-asm = "0.1.4"
+num_cpus = "1.16.0"
+rand = "0.9.0"
 ratatui = "0.29.0"
+secp256k1 = "0.30.0"
 xorf = { version = "0.11.0", features = ["bincode"] }
 xxhash-rust = { version = "0.8.15", features = ["std", "xxh3"] }
 

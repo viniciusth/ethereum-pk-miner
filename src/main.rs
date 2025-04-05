@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use bip39miner::runner::{Runner, prepare::new_prepare_runner};
+use bip39miner::runner::{miner::new_miner_runner, prepare::new_prepare_runner, Runner};
 use clap::{Parser, Subcommand};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::DefaultTerminal;
@@ -29,6 +29,9 @@ enum CliCommands {
         )]
         fuse: u8,
     },
+
+    Miner {
+    }
 }
 
 fn main() {
@@ -41,12 +44,15 @@ fn main() {
 }
 
 fn run(mut terminal: DefaultTerminal, cli: Cli) -> color_eyre::Result<()> {
-    let runner: Box<dyn Runner> = match cli.cmd {
+    let mut runner: Box<dyn Runner> = match cli.cmd {
         CliCommands::PrepareData { csv_path, fuse } => {
             if ![8, 16, 32].contains(&fuse) {
                 return Err(clap::Error::new(clap::error::ErrorKind::InvalidValue).into());
             }
             new_prepare_runner(csv_path, fuse)
+        }
+        CliCommands::Miner {  } => {
+            new_miner_runner()
         }
     };
 

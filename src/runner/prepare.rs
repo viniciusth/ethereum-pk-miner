@@ -21,7 +21,7 @@ use super::Runner;
 struct PrepareRunner {
     csv_path: String,
     info: Arc<Mutex<PrepareInfo>>,
-    handle: Mutex<Option<thread::JoinHandle<()>>>,
+    handle: Option<thread::JoinHandle<()>>,
     fuse: u8,
 }
 
@@ -33,12 +33,12 @@ enum PrepareInfo {
 }
 
 impl Runner for PrepareRunner {
-    fn start(&self) -> color_eyre::Result<()> {
+    fn start(&mut self) -> color_eyre::Result<()> {
         let info = self.info.clone();
         let csv_path = self.csv_path.clone();
         let fuse = self.fuse.clone();
         let handle = thread::spawn(move || run(info, csv_path, fuse));
-        *self.handle.lock().unwrap() = Some(handle);
+        self.handle.replace(handle);
         Ok(())
     }
 
@@ -81,7 +81,7 @@ pub fn new_prepare_runner(csv_path: String, fuse: u8) -> Box<dyn Runner> {
         csv_path,
         fuse,
         info: Arc::new(Mutex::new(PrepareInfo::Nothing)),
-        handle: Mutex::new(None),
+        handle: None,
     })
 }
 

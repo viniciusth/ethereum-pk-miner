@@ -1,2 +1,5 @@
 /target
-/data
+/data/postgres-data
+/data/accounts.csv
+/data/xorfilter16
+/data/xorfilter8
