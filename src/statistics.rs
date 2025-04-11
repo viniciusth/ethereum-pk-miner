@@ -1,4 +1,11 @@
-use std::{sync::{atomic::{AtomicU64, Ordering}, Arc, LazyLock}, time::Duration};
+use std::{
+    collections::HashMap,
+    sync::{
+        Arc, LazyLock, RwLock,
+        atomic::{AtomicU64, Ordering},
+    },
+    time::Duration,
+};
 
 pub static STATISTICS: LazyLock<Statistics> = LazyLock::new(|| Statistics {
     data: [StatisticsData::default(), StatisticsData::default()],
@@ -11,6 +18,7 @@ pub static STATISTICS: LazyLock<Statistics> = LazyLock::new(|| Statistics {
 ///  - number of successes
 ///  - accumulated time taken (for average time per try) for try & check
 ///  - average tries/s
+///  - any other named timing average operation /s
 pub struct Statistics {
     pub data: [StatisticsData; 2],
 }
@@ -28,18 +36,24 @@ pub struct StatisticsData {
 
     try_time_taken_ns: AtomicU64,
     check_time_taken_ns: AtomicU64,
+
+    /// Write only on insertion, all other operations can be done on read.
+    /// Map<name, (count, total_time)>
+    others: RwLock<HashMap<String, (AtomicU64, AtomicU64)>>,
 }
 
 impl StatisticsData {
     pub fn add_try(&self, time: Duration) {
         self.tries.fetch_add(1, Ordering::Relaxed);
         let ns = time.as_nanos();
-        self.try_time_taken_ns.fetch_add(ns as u64, Ordering::Relaxed);
+        self.try_time_taken_ns
+            .fetch_add(ns as u64, Ordering::Relaxed);
     }
 
     pub fn add_check(&self, found: bool, time: Duration) {
         let ns = time.as_nanos();
-        self.check_time_taken_ns.fetch_add(ns as u64, Ordering::Relaxed);
+        self.check_time_taken_ns
+            .fetch_add(ns as u64, Ordering::Relaxed);
         if found {
             self.successes.fetch_add(1, Ordering::Relaxed);
         } else {
@@ -71,6 +85,27 @@ impl StatisticsData {
         // floor it as u64
         let taken_secs = self.check_time_taken_ns.load(Ordering::Relaxed) / (1e9 as u64);
         (self.false_positives() + self.successes()) as f64 / taken_secs as f64
+    }
+
+    /// Adds a named timing to the structure, all values can be fetched through [get_throughputs]
+    pub fn add_timing(&self, name: &str, time: Duration) {
+        if let Some(x) = self.others.read().unwrap().get(name) {
+            let ns = time.as_nanos() as u64;
+            x.0.fetch_add(1, Ordering::Relaxed);
+            x.1.fetch_add(ns, Ordering::Relaxed);
+        } else {
+            self.others.write().unwrap().entry(name.to_owned()).or_default();
+            self.add_timing(name, time);
+        }
+    }
+
+    /// Returns the throughput of all named timings, as operations/s
+    pub fn get_throughputs(&self) -> Vec<(String, f64)> {
+        self.others.read().unwrap().iter().map(|(k, v)| {
+            let taken_secs = v.1.load(Ordering::Relaxed) / (1e9 as u64);
+            let count = v.0.load(Ordering::Relaxed);
+            (k.to_owned(), count as f64 / taken_secs as f64)
+        }).collect()
     }
 }
 
