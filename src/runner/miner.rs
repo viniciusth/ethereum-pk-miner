@@ -5,7 +5,7 @@ use ratatui::{text::Text, widgets::{Block, Paragraph, Widget}};
 use xorf::{BinaryFuse16, Filter};
 use xxhash_rust::xxh3::xxh3_64;
 
-use crate::{generator::CryptoGenerator, statistics::Strategy, utils::{addr_from_pk, encode_hex}};
+use crate::{db::address_exists, generator::CryptoGenerator, statistics::Strategy, utils::{addr_from_pk, encode_hex}};
 
 use super::Runner;
 
@@ -17,7 +17,8 @@ struct MinerRunner {
 
 impl Runner for MinerRunner {
     fn start(&mut self) -> color_eyre::Result<()> {
-        let count = num_cpus::get().max(3) - 2;
+        // let count = num_cpus::get().max(3) - 2;
+        let count = 1;
         let (tx, rx) = mpsc::sync_channel(100);
         for _ in 0..count {
             let filter = self.filter.clone();
@@ -110,11 +111,13 @@ pub fn checker_thread(rx: mpsc::Receiver<Strategy>) {
         match &msg {
             Strategy::Random { rng_info, pk, addr } => {
                 let addr = encode_hex(addr);
-                let pk = encode_hex(pk);
-                let msg = format!("pk: {pk}, addr: {addr}, info: {rng_info}");
-                let err_msg = format!("failed to write: {msg}");
-                writeln!(file, "{msg}").expect(&err_msg);
-                file.flush().expect(&err_msg);
+                if address_exists(&format!("0x{addr}")) {
+                    let pk = encode_hex(pk);
+                    let msg = format!("pk: {pk}, addr: {addr}, info: {rng_info}");
+                    let err_msg = format!("failed to write: {msg}");
+                    writeln!(file, "{msg}").expect(&err_msg);
+                    file.flush().expect(&err_msg);
+                }
             },
             _ => unreachable!(),
         };

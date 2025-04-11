@@ -17,17 +17,21 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum CliCommands {
-    PrepareData {
+    Prepare {
         /// Solution file to expand
         #[arg(short, long, default_value = RAW_DATA_PATH_FROM_ROOT)]
         csv_path: String,
 
+        /// Whether to compute the fuse or not, must be a value of 8, 16, 32.
         #[arg(
             short,
             long,
-            default_value_t = 8,
+            default_value_t = 0,
         )]
         fuse: u8,
+
+        #[arg(short, long)]
+        db: bool,
     },
 
     Miner {
@@ -45,11 +49,11 @@ fn main() {
 
 fn run(mut terminal: DefaultTerminal, cli: Cli) -> color_eyre::Result<()> {
     let mut runner: Box<dyn Runner> = match cli.cmd {
-        CliCommands::PrepareData { csv_path, fuse } => {
-            if ![8, 16, 32].contains(&fuse) {
+        CliCommands::Prepare { csv_path, fuse, db } => {
+            if ![0, 8, 16, 32].contains(&fuse) {
                 return Err(clap::Error::new(clap::error::ErrorKind::InvalidValue).into());
             }
-            new_prepare_runner(csv_path, fuse)
+            new_prepare_runner(csv_path, fuse, db)
         }
         CliCommands::Miner {  } => {
             new_miner_runner()

@@ -1,6 +1,6 @@
 use std::{
     fs::File,
-    io::BufWriter,
+    io::{BufWriter, Write},
     sync::{Arc, Mutex},
     thread,
     time::{Duration, Instant},
@@ -14,7 +14,7 @@ use ratatui::{
 };
 use xxhash_rust::xxh3::xxh3_64;
 
-use crate::utils::parse_eth_hex;
+use crate::{db::sort_addresses, utils::parse_eth_hex};
 
 use super::Runner;
 
@@ -23,6 +23,7 @@ struct PrepareRunner {
     info: Arc<Mutex<PrepareInfo>>,
     handle: Option<thread::JoinHandle<()>>,
     fuse: u8,
+    db: bool,
 }
 
 #[derive(Clone)]
@@ -37,7 +38,8 @@ impl Runner for PrepareRunner {
         let info = self.info.clone();
         let csv_path = self.csv_path.clone();
         let fuse = self.fuse.clone();
-        let handle = thread::spawn(move || run(info, csv_path, fuse));
+        let db = self.db.clone();
+        let handle = thread::spawn(move || run(info, csv_path, fuse, db));
         self.handle.replace(handle);
         Ok(())
     }
@@ -76,16 +78,17 @@ impl Runner for PrepareRunner {
     }
 }
 
-pub fn new_prepare_runner(csv_path: String, fuse: u8) -> Box<dyn Runner> {
+pub fn new_prepare_runner(csv_path: String, fuse: u8, db: bool) -> Box<dyn Runner> {
     Box::new(PrepareRunner {
         csv_path,
         fuse,
+        db,
         info: Arc::new(Mutex::new(PrepareInfo::Nothing)),
         handle: None,
     })
 }
 
-fn run(info: Arc<Mutex<PrepareInfo>>, csv_path: String, fuse: u8) {
+fn run(info: Arc<Mutex<PrepareInfo>>, csv_path: String, fuse: u8, db: bool) {
     let start = Instant::now();
     let file_size = File::open(&csv_path).unwrap().metadata().unwrap().len();
 
@@ -93,38 +96,57 @@ fn run(info: Arc<Mutex<PrepareInfo>>, csv_path: String, fuse: u8) {
     let mut iters = 0;
     let mut data = [0u8; 20];
     // Current amount of addresses in the csv, adjust if changed data.
-    let mut filter_data = Vec::with_capacity(142849835);
-    // const BITS_PER_MEGABYTE: u64 = 1024 * 1024 * 8;
+    const ROWS: usize = 142849835;
+
+    let mut filter_data = None;
+    if fuse > 0 {
+        filter_data = Some(Vec::with_capacity(ROWS));
+    }
+
+    let mut insert_data = None;
+    if db {
+        insert_data = Some(BufWriter::new(File::create("./data/addressdb").unwrap()));
+    }
 
     while let Some(Ok(c)) = reader.next() {
-        parse_eth_hex(&c[1], &mut data);
-        let hsh = xxh3_64(&data);
-        filter_data.push(hsh);
-        if iters % 1000 == 0 {
+        if let Some(d) = insert_data.as_mut() {
+            d.write(c[1].as_bytes()).unwrap();
+        }
+
+        if let Some(f) = filter_data.as_mut() {
+            parse_eth_hex(&c[1], &mut data);
+            let hsh = xxh3_64(&data);
+            f.push(hsh);
+        }
+
+        if iters % 100_000 == 0 {
             *info.lock().unwrap() =
                 PrepareInfo::Reading(reader.reader().position().byte(), file_size, start);
         }
         iters += 1;
     }
 
+
+    if db {
+        sort_addresses(iters);
+    }
+
     match fuse {
+        0 => {}
         8 => {
-            let filter = xorf::BinaryFuse8::try_from(&filter_data).unwrap();
-            drop(filter_data);
+            let filter = xorf::BinaryFuse8::try_from(&filter_data.unwrap()).unwrap();
             let mut writer = BufWriter::new(File::create("./data/xorfilter8").unwrap());
             bincode::encode_into_std_write(filter, &mut writer, bincode::config::standard())
                 .unwrap();
         }
         16 => {
-            let filter = xorf::BinaryFuse16::try_from(&filter_data).unwrap();
-            drop(filter_data);
+            let filter = xorf::BinaryFuse16::try_from(&filter_data.unwrap()).unwrap();
             let mut writer = BufWriter::new(File::create("./data/xorfilter16").unwrap());
             bincode::encode_into_std_write(filter, &mut writer, bincode::config::standard())
                 .unwrap();
         }
         32 => {
-            let filter = xorf::BinaryFuse32::try_from(&filter_data).unwrap();
-            drop(filter_data);
+            let filter = xorf::BinaryFuse32::try_from(&filter_data.unwrap()).unwrap();
             let mut writer = BufWriter::new(File::create("./data/xorfilter32").unwrap());
             bincode::encode_into_std_write(filter, &mut writer, bincode::config::standard())
                 .unwrap();
