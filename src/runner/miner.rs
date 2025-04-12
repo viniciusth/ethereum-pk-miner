@@ -1,11 +1,26 @@
-use std::{fs::{File, OpenOptions}, io::{BufReader, Write}, sync::{mpsc, Arc}, thread::{self, JoinHandle}, time::Instant};
+use std::{
+    fs::{File, OpenOptions},
+    io::{BufReader, Write},
+    sync::{Arc, mpsc},
+    thread::{self, JoinHandle},
+    time::Instant,
+};
 
 use rand::rng;
-use ratatui::{text::Text, widgets::{Block, Paragraph, Widget}};
+use ratatui::{
+    text::Text,
+    widgets::{Block, Paragraph, Widget},
+};
 use xorf::{BinaryFuse16, Filter};
 use xxhash_rust::xxh3::xxh3_64;
 
-use crate::{db::address_exists, generator::CryptoGenerator, statistics::Strategy, utils::{addr_from_pk, encode_hex}};
+use crate::{
+    db::address_exists,
+    generator::CryptoGenerator,
+    measure,
+    statistics::Strategy,
+    utils::{addr_from_pk, encode_hex},
+};
 
 use super::Runner;
 
@@ -43,17 +58,25 @@ impl Runner for MinerRunner {
         let false_positives = Strategy::random_statistics().false_positives();
         let tries_throughput = Strategy::random_statistics().tries_throughput();
         let checks_throughput = Strategy::random_statistics().check_throughput();
+        let mut others_throughput = Strategy::random_statistics().get_throughputs();
+        others_throughput.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+        let others = others_throughput
+            .iter()
+            .map(|(name, tp)| format!("{name}: {tp:.2}/s"));
 
-        let lines = Text::from_iter([
-            format!("Active Threads: {}", self.pool.len() + 2),
-            format!("Tries: {tries}, Throughput: {tries_throughput:.2}/s"),
-            format!("False Positives: {false_positives}, Throughput: {checks_throughput:.2}/s"),
-        ]);
+        let lines = Text::from_iter(
+            [
+                format!("Active Threads: {}", self.pool.len() + 2),
+                format!("Tries: {tries}, Throughput: {tries_throughput:.2}/s"),
+                format!("False Positives: {false_positives}, Throughput: {checks_throughput:.2}/s"),
+            ]
+            .into_iter()
+            .chain(others),
+        );
         Paragraph::new(lines)
             .block(Block::bordered().title("Application Status"))
             .centered()
             .render(area, buffer);
-
 
         Ok(())
     }
@@ -80,20 +103,36 @@ pub fn worker_thread(filter: Arc<BinaryFuse16>, tx: mpsc::SyncSender<Strategy>) 
         iter += 1;
         if iter == 100_000 {
             iter = 1;
-            rng.reseed().unwrap();
+            measure! {
+                "worker.reseed"
+                {
+                    rng.reseed().unwrap();
+                }
+            }
         }
 
         let pk = rng.generate_pk();
         addr_from_pk(&pk, &mut addr);
-        let hsh = xxh3_64(&addr);
+        let hsh = measure! {
+            "worker.xxh3_64"
+            {
+                xxh3_64(&addr)
+            }
+        };
+
         let msg = Strategy::Random {
             rng_info: "ThreadRng".into(),
             pk,
             addr: addr.clone(),
         };
 
-        if filter.contains(&hsh) {
-            tx.send(msg).expect("checker shouldn't have died");
+        measure! {
+            "worker.filter.contains"
+            {
+                if filter.contains(&hsh) {
+                    tx.send(msg).expect("checker shouldn't have died");
+                }
+            }
         }
 
         Strategy::random_statistics().add_try(start.elapsed());
@@ -118,7 +157,7 @@ pub fn checker_thread(rx: mpsc::Receiver<Strategy>) {
                     writeln!(file, "{msg}").expect(&err_msg);
                     file.flush().expect(&err_msg);
                 }
-            },
+            }
             _ => unreachable!(),
         };
         msg.statistics().add_check(false, start.elapsed());

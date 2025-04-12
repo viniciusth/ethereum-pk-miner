@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use rand::RngCore;
 
-use crate::wordlist::WORDS;
+use crate::{measure, wordlist::WORDS};
 
 /// Maybe we'll want to try different rng's, so just leave a trait here for now
 pub trait CryptoGenerator {
@@ -14,7 +14,12 @@ pub trait CryptoGenerator {
 impl<T: RngCore> CryptoGenerator for T {
     fn generate_pk(&mut self) -> [u8; 32] {
         let mut data = [0; 32];
-        self.fill_bytes(&mut data);
+        measure! {
+            "generate_pk"
+            {
+                self.fill_bytes(&mut data);
+            }
+        }
         data
     }
 

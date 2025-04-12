@@ -75,16 +75,14 @@ impl StatisticsData {
 
     /// Returns the average amount of tries per second.
     pub fn tries_throughput(&self) -> f64 {
-        // floor it as u64
-        let taken_secs = self.try_time_taken_ns.load(Ordering::Relaxed) / (1e9 as u64);
-        self.tries() as f64 / taken_secs as f64
+        let taken_secs = self.try_time_taken_ns.load(Ordering::Relaxed) as f64 / 1e9;
+        self.tries() as f64 / taken_secs
     }
 
     /// Returns the average amount of tries per second.
     pub fn check_throughput(&self) -> f64 {
-        // floor it as u64
-        let taken_secs = self.check_time_taken_ns.load(Ordering::Relaxed) / (1e9 as u64);
-        (self.false_positives() + self.successes()) as f64 / taken_secs as f64
+        let taken_secs = self.check_time_taken_ns.load(Ordering::Relaxed) as f64 / 1e9;
+        (self.false_positives() + self.successes()) as f64 / taken_secs
     }
 
     /// Adds a named timing to the structure, all values can be fetched through [get_throughputs]
@@ -94,18 +92,27 @@ impl StatisticsData {
             x.0.fetch_add(1, Ordering::Relaxed);
             x.1.fetch_add(ns, Ordering::Relaxed);
         } else {
-            self.others.write().unwrap().entry(name.to_owned()).or_default();
+            self.others
+                .write()
+                .unwrap()
+                .entry(name.to_owned())
+                .or_default();
             self.add_timing(name, time);
         }
     }
 
     /// Returns the throughput of all named timings, as operations/s
     pub fn get_throughputs(&self) -> Vec<(String, f64)> {
-        self.others.read().unwrap().iter().map(|(k, v)| {
-            let taken_secs = v.1.load(Ordering::Relaxed) / (1e9 as u64);
-            let count = v.0.load(Ordering::Relaxed);
-            (k.to_owned(), count as f64 / taken_secs as f64)
-        }).collect()
+        self.others
+            .read()
+            .unwrap()
+            .iter()
+            .map(|(k, v)| {
+                let taken_secs = v.1.load(Ordering::Relaxed) as f64 / 1e9;
+                let count = v.0.load(Ordering::Relaxed);
+                (k.to_owned(), count as f64 / taken_secs)
+            })
+            .collect()
     }
 }
 
@@ -137,5 +144,17 @@ impl Strategy {
 
     pub fn random_statistics() -> &'static StatisticsData {
         &STATISTICS.data[0]
+    }
+}
+
+#[macro_export]
+macro_rules! measure {
+    ($name:literal $code:block) => {
+        {
+            let _private_now = std::time::Instant::now();
+            let res = $code;
+            crate::statistics::Strategy::random_statistics().add_timing($name, _private_now.elapsed());
+            res
+        }
     }
 }

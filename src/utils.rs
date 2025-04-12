@@ -1,6 +1,8 @@
 use keccak_asm::{Digest, Keccak256};
 use secp256k1::{PublicKey, Secp256k1, SecretKey};
 
+use crate::measure;
+
 /// Parses an eth address hex encoded (lowercase) string into its byte format.
 /// Panics on invalid format.
 pub fn parse_eth_hex(s: &str, v: &mut [u8]) {
@@ -9,29 +11,44 @@ pub fn parse_eth_hex(s: &str, v: &mut [u8]) {
 }
 
 pub fn decode_hex(s: &str, v: &mut [u8]) {
-    s.as_bytes()[2..].chunks(2).enumerate().for_each(|(i, c)| {
-        unsafe {
-            v[i] = u8::from_str_radix(str::from_utf8_unchecked(c), 16).unwrap();
+    measure! {
+        "decode_hex"
+        {
+            s.as_bytes()[2..].chunks(2).enumerate().for_each(|(i, c)| {
+                unsafe {
+                    v[i] = u8::from_str_radix(str::from_utf8_unchecked(c), 16).unwrap();
+                }
+            });
         }
-    });
+    }
 }
 
 pub fn encode_hex(v: &[u8]) -> String {
-    v.iter().map(|c| {
-        format!("{c:02x}")
-    }).collect()
+    measure! {
+        "encode_hex"
+        {
+            v.iter().map(|c| {
+                format!("{c:02x}")
+            }).collect()
+        }
+    }
 }
 
 /// Generates the eth address from a source private key.
 pub fn addr_from_pk(pk: &[u8], target: &mut [u8]) {
-    assert!(pk.len() == 32 && target.len() == 20);
-    let secp = Secp256k1::new();
-    let sk = SecretKey::from_byte_array(pk.try_into().unwrap()).unwrap();
-    let pubk = PublicKey::from_secret_key(&secp, &sk).serialize_uncompressed();
-    let mut keccak = Keccak256::new();
-    keccak.update(&pubk[1..]);
-    let data = keccak.finalize();
-    target.copy_from_slice(&data[12..32]);
+    measure! {
+        "addr_from_pk"
+        {
+            assert!(pk.len() == 32 && target.len() == 20);
+            let secp = Secp256k1::new();
+            let sk = SecretKey::from_byte_array(pk.try_into().unwrap()).unwrap();
+            let pubk = PublicKey::from_secret_key(&secp, &sk).serialize_uncompressed();
+            let mut keccak = Keccak256::new();
+            keccak.update(&pubk[1..]);
+            let data = keccak.finalize();
+            target.copy_from_slice(&data[12..32]);
+        }
+    }
 }
 
 
