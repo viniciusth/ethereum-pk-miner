@@ -12,8 +12,9 @@ We have 3 types of threads:
     - checks addresses that got sent for double-checking with a sqlite db containing all ethereum addresses
 
 Only one thread is necessary for the UI and the Checker each.
+
 Worker threads should be as many as possible, i.e., N-2 where N is the number of cores,
-though in my 32 core system doing only 8 worker threads leads to only around 20% less throughput but way less cpu usage.
+though in my 28 core system doing only 8 worker threads leads to only around 20% less throughput but way less cpu usage.
 
 ### Steps to run
 #### Bigquery public ethereum data
@@ -66,3 +67,9 @@ Options:
   -h, --help                   Print help
 ```
 
+### Results
+On my laptop's i7-14700HX, running on 26 worker threads:
+![image](https://github.com/user-attachments/assets/7d87144f-e377-4afe-9b51-b11441fe9364)
+
+On 8 worker threads:
+![image](https://github.com/user-attachments/assets/b47a037e-3026-42b1-a927-2536be6ed303)
