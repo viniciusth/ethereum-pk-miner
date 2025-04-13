@@ -51,7 +51,6 @@ pub fn addr_from_pk(pk: &[u8], target: &mut [u8]) {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use crate::utils::encode_hex;
@@ -81,6 +80,11 @@ mod tests {
 
         let mut target = [0; 20];
         addr_from_pk(&pk_bytes, &mut target);
-        assert!(target == expected_bytes, "Mismatched: {} VS {}", encode_hex(&target), encode_hex(&expected_bytes));
+        assert!(
+            target == expected_bytes,
+            "Mismatched: {} VS {}",
+            encode_hex(&target),
+            encode_hex(&expected_bytes)
+        );
     }
 }

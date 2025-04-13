@@ -50,4 +50,3 @@ impl<T: RngCore> CryptoGenerator for T {
         words
     }
 }
-

@@ -4,7 +4,7 @@ use std::{
         Arc, LazyLock, RwLock,
         atomic::{AtomicU64, Ordering},
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 pub static STATISTICS: LazyLock<Statistics> = LazyLock::new(|| Statistics {
@@ -23,10 +23,11 @@ pub struct Statistics {
     pub data: [StatisticsData; 2],
 }
 
-#[derive(Default)]
 pub struct StatisticsData {
     /// Value is increased by worker threads.
     tries: AtomicU64,
+
+    program_start: Instant,
 
     /// Value is increased by checker thread after verification.
     false_positives: AtomicU64,
@@ -40,6 +41,20 @@ pub struct StatisticsData {
     /// Write only on insertion, all other operations can be done on read.
     /// Map<name, (count, total_time)>
     others: RwLock<HashMap<String, (AtomicU64, AtomicU64)>>,
+}
+
+impl Default for StatisticsData {
+    fn default() -> Self {
+        Self {
+            program_start: Instant::now(),
+            tries: 0.into(),
+            false_positives: 0.into(),
+            successes: 0.into(),
+            try_time_taken_ns: 0.into(),
+            check_time_taken_ns: 0.into(),
+            others: RwLock::new(HashMap::new()),
+        }
+    }
 }
 
 impl StatisticsData {
@@ -73,9 +88,15 @@ impl StatisticsData {
         self.false_positives.load(Ordering::Relaxed)
     }
 
-    /// Returns the average amount of tries per second.
+    /// Returns the average amount of tries per second per thread.
     pub fn tries_throughput(&self) -> f64 {
         let taken_secs = self.try_time_taken_ns.load(Ordering::Relaxed) as f64 / 1e9;
+        self.tries() as f64 / taken_secs
+    }
+
+    /// Overall average amount of tries per second since execution start.
+    pub fn overall_tries_throughput(&self) -> f64 {
+        let taken_secs = self.program_start.elapsed().as_nanos() as f64 / 1e9;
         self.tries() as f64 / taken_secs
     }
 
@@ -149,12 +170,10 @@ impl Strategy {
 
 #[macro_export]
 macro_rules! measure {
-    ($name:literal $code:block) => {
-        {
-            let _private_now = std::time::Instant::now();
-            let res = $code;
-            crate::statistics::Strategy::random_statistics().add_timing($name, _private_now.elapsed());
-            res
-        }
-    }
+    ($name:literal $code:block) => {{
+        let _private_now = std::time::Instant::now();
+        let res = $code;
+        crate::statistics::Strategy::random_statistics().add_timing($name, _private_now.elapsed());
+        res
+    }};
 }
