@@ -11,7 +11,7 @@ use ratatui::{
     text::Text,
     widgets::{Block, Paragraph, Widget},
 };
-use xorf::{BinaryFuse16, Filter};
+use xorf::{BinaryFuse8, BinaryFuse16, BinaryFuse32, Filter};
 use xxhash_rust::xxh3::xxh3_64;
 
 use crate::{
@@ -25,15 +25,20 @@ use crate::{
 use super::Runner;
 
 struct MinerRunner {
+    threads: u8,
     pool: Vec<JoinHandle<()>>,
     checker: Option<JoinHandle<()>>,
-    filter: Arc<BinaryFuse16>,
+    filter: Arc<dyn Filter<u64> + Send + Sync>,
 }
 
 impl Runner for MinerRunner {
     fn start(&mut self) -> color_eyre::Result<()> {
-        // let count = num_cpus::get().max(3) - 2;
-        let count = 1;
+        let count = if self.threads > 0 {
+            self.threads as usize
+        } else {
+            num_cpus::get().max(3) - 2
+        };
+
         let (tx, rx) = mpsc::sync_channel(100);
         for _ in 0..count {
             let filter = self.filter.clone();
@@ -57,6 +62,7 @@ impl Runner for MinerRunner {
         let tries = Strategy::random_statistics().tries();
         let false_positives = Strategy::random_statistics().false_positives();
         let tries_throughput = Strategy::random_statistics().tries_throughput();
+        let actual_throughput = Strategy::random_statistics().overall_tries_throughput();
         let checks_throughput = Strategy::random_statistics().check_throughput();
         let mut others_throughput = Strategy::random_statistics().get_throughputs();
         others_throughput.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
@@ -67,33 +73,51 @@ impl Runner for MinerRunner {
         let lines = Text::from_iter(
             [
                 format!("Active Threads: {}", self.pool.len() + 2),
-                format!("Tries: {tries}, Throughput: {tries_throughput:.2}/s"),
+                format!("Tries: {tries}, Throughput per thread: {tries_throughput:.2}/s, Total Throughput: {actual_throughput:.2}/s"),
                 format!("False Positives: {false_positives}, Throughput: {checks_throughput:.2}/s"),
+                "--- Other Metrics ---".to_string(),
             ]
             .into_iter()
             .chain(others),
         );
         Paragraph::new(lines)
             .block(Block::bordered().title("Application Status"))
-            .centered()
+            // .centered()
             .render(area, buffer);
 
         Ok(())
     }
 }
 
-pub fn new_miner_runner() -> Box<dyn Runner> {
-    let reader = BufReader::new(File::open("./data/xorfilter16").unwrap());
-    let filter: BinaryFuse16 =
-        bincode::decode_from_reader(reader, bincode::config::standard()).unwrap();
+pub fn new_miner_runner(threads: u8, fuse: u8, fuse_path: String) -> Box<dyn Runner> {
+    let reader = BufReader::new(File::open(&fuse_path).unwrap());
+    let filter: Arc<dyn Filter<u64> + Send + Sync> = match fuse {
+        8 => {
+            let filter: BinaryFuse8 =
+                bincode::decode_from_reader(reader, bincode::config::standard()).unwrap();
+            Arc::new(filter)
+        }
+        16 => {
+            let filter: BinaryFuse16 =
+                bincode::decode_from_reader(reader, bincode::config::standard()).unwrap();
+            Arc::new(filter)
+        }
+        32 => {
+            let filter: BinaryFuse32 =
+                bincode::decode_from_reader(reader, bincode::config::standard()).unwrap();
+            Arc::new(filter)
+        }
+        _ => unreachable!(),
+    };
     Box::new(MinerRunner {
         pool: vec![],
+        threads,
         checker: None,
-        filter: Arc::new(filter),
+        filter,
     })
 }
 
-pub fn worker_thread(filter: Arc<BinaryFuse16>, tx: mpsc::SyncSender<Strategy>) {
+pub fn worker_thread(filter: Arc<dyn Filter<u64>>, tx: mpsc::SyncSender<Strategy>) {
     let mut rng = rng();
 
     let mut iter = 0;
@@ -123,7 +147,7 @@ pub fn worker_thread(filter: Arc<BinaryFuse16>, tx: mpsc::SyncSender<Strategy>) 
         let msg = Strategy::Random {
             rng_info: "ThreadRng".into(),
             pk,
-            addr: addr.clone(),
+            addr,
         };
 
         measure! {

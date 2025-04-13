@@ -173,7 +173,7 @@ macro_rules! measure {
     ($name:literal $code:block) => {{
         let _private_now = std::time::Instant::now();
         let res = $code;
-        crate::statistics::Strategy::random_statistics().add_timing($name, _private_now.elapsed());
+        $crate::statistics::Strategy::random_statistics().add_timing($name, _private_now.elapsed());
         res
     }};
 }

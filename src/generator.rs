@@ -34,8 +34,8 @@ impl<T: RngCore> CryptoGenerator for T {
         num >>= 1;
         let mut bits = 7;
         let mut words = Vec::with_capacity(len);
-        for i in 1..32 {
-            num = (num << 8) | data[i] as u32;
+        for &d in data.iter().skip(1) {
+            num = (num << 8) | d as u32;
             bits += 8;
             if bits >= 11 {
                 words.push(WORDS[num as usize & 2047].clone());
